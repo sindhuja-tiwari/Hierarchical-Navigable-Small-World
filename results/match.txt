@@ -1,0 +1,7 @@
+wrote data/recall_vs_qps.png
+
+QPS at fixed recall@10 (interpolated, qps_1t):
+recall        hnsw-cpp     hnswlib             ratio
+0.90              8608        8708             0.99x
+0.95              6420        6667             0.96x
+0.99              4414        4300             1.03x
