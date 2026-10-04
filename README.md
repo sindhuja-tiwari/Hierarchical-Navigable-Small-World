@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 # hnsw-cpp
+=======
+# Hierarchical-Navigable-Small-World (cpp)
+>>>>>>> e0298b002a15c03aaa6a30854d8a1516db6ef89c
 
 A from-scratch **HNSW** (Hierarchical Navigable Small World) approximate nearest-neighbour index in
 C++17, built from the original paper (Malkov & Yashunin). Header-only, no dependencies, with a
@@ -31,10 +35,13 @@ auto hits = index.search(query, /*k=*/10, /*ef=*/100); // vector<pair<squared_di
 
 ## Reproducing the benchmark on the standard datasets
 
+<<<<<<< HEAD
 **Fastest path:** `pip install numpy matplotlib h5py hnswlib && scripts/run_all.sh 8` builds, runs the tests,
 downloads SIFT1M + GloVe-100, benchmarks both implementations, plots, and prints resume bullets filled
 from the measured numbers (`scripts/summarize.py`). Manual steps:
 
+=======
+>>>>>>> e0298b002a15c03aaa6a30854d8a1516db6ef89c
 ```bash
 scripts/fetch_data.sh                                    # SIFT1M (fvecs) + GloVe-100 (hdf5)
 python3 scripts/hdf5_to_fvecs.py data/glove-100-angular.hdf5 data/glove
