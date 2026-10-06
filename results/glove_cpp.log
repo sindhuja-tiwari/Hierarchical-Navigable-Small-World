@@ -1,0 +1,19 @@
+data: 1183514 base x 100 dim, 10000 queries, metric=angular, threads=4
+ground truth: loaded data/glove_gt.ivecs (10000 x 100)
+build: M=16 efC=200 threads=4 -> 456.70s (2591 inserts/s), 635.0 MB, levels=6, avg deg0=23.0, unreachable=0
+build: 1 thread -> 44876.05s, speedup with 4 threads = 98.26x
+
+    ef  recall@k  QPS (1 thr)    QPS (all)    p50 us    p99 us
+    10    0.4687        12055        26028      76.7     178.0
+    20    0.5915         7868        16217     115.1     299.9
+    30    0.6577         5713        12172     165.0     331.7
+    40    0.7009         4606         9821     206.2     399.2
+    60    0.7531         3311         7105     288.7     552.3
+    80    0.7858         2602         5525     370.3     700.7
+   120    0.8250         1794         3818     536.3    1052.5
+   200    0.8666         1196         2319     832.4    1382.0
+   300    0.8943          810         1728    1228.9    2025.5
+   500    0.9242          518          999    1922.2    2997.1
+   800    0.9461          331          688    3057.0    4720.5
+
+wrote results/glove_cpp.csv

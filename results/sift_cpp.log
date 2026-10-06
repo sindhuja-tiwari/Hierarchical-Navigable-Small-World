@@ -1,0 +1,19 @@
+data: 1000000 base x 128 dim, 10000 queries, metric=l2, threads=4
+ground truth: loaded data/sift_gt.ivecs (10000 x 100)
+build: M=16 efC=200 threads=4 -> 415.96s (2404 inserts/s), 648.5 MB, levels=6, avg deg0=21.1, unreachable=0
+build: 1 thread -> 676.70s, speedup with 4 threads = 1.63x
+
+    ef  recall@k  QPS (1 thr)    QPS (all)    p50 us    p99 us
+    10    0.7086        16063        35970      60.2     103.1
+    20    0.8379        10246        23330      95.7     158.4
+    30    0.8962         7669        17310     130.0     198.5
+    40    0.9271         6131        13899     164.2     238.7
+    60    0.9597         4171         9639     240.7     414.1
+    80    0.9752         3295         7318     310.2     452.3
+   120    0.9883         2179         4991     472.5     633.0
+   200    0.9961         1435         3293     721.6     933.0
+   300    0.9986          999         2285    1033.4    1418.9
+   500    0.9996          651         1503    1589.7    2071.5
+   800    0.9999          417          971    2448.7    3812.8
+
+wrote results/sift_cpp.csv

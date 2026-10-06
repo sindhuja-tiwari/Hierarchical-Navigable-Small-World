@@ -1,0 +1,7 @@
+wrote results/glove.png
+
+QPS at fixed recall@10 (interpolated, qps_1t):
+recall        hnsw-cpp     hnswlib             ratio
+0.90               745         633             1.18x
+0.95                 -           -
+0.99                 -           -

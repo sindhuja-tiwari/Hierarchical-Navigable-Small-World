@@ -6,10 +6,23 @@
 # Time: roughly 30-60 min on 8 cores (the --compare-build single-thread build of 1M points dominates).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-T=${1:-$(nproc)}
-make all
-make test
-scripts/fetch_data.sh
+if [ -n "${1:-}" ]; then
+  T="$1"
+elif command -v nproc >/dev/null 2>&1; then
+  T="$(nproc)"
+else
+  T="$(sysctl -n hw.ncpu)"
+fi
+
+CXX="${CXX:-c++}"
+
+make CXX="$CXX" all
+make CXX="$CXX" test
+
+if [ ! -f data/sift_base.fvecs ] || [ ! -f data/sift_query.fvecs ]; then
+  scripts/fetch_data.sh
+fi
+
 [ -f data/glove_base.fvecs ] || python3 scripts/hdf5_to_fvecs.py data/glove-100-angular.hdf5 data/glove
 mkdir -p results
 EF=10,20,30,40,60,80,120,200,300,500,800

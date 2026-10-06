@@ -1,0 +1,7 @@
+wrote results/sift.png
+
+QPS at fixed recall@10 (interpolated, qps_1t):
+recall        hnsw-cpp     hnswlib             ratio
+0.90              7462        5186             1.44x
+0.95              4676        3842             1.22x
+0.99              1990        1863             1.07x
