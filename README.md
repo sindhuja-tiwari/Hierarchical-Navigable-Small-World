@@ -6,17 +6,6 @@ multithreaded build, lock-free queries, an AVX2 distance kernel, a correctness s
 under ASan / UBSan / TSan, and a benchmark harness that measures **recall@10 vs queries-per-second**
 against [hnswlib](https://github.com/nmslib/hnswlib) on the same data and ground truth.
 
-![recall vs QPS](results/recall_vs_qps.png)
-
-```
-include/hnsw.h        the index (~550 lines)
-include/dataset.h     fvecs/ivecs IO, synthetic data, parallel brute-force ground truth
-src/bench.cpp         recall@k vs QPS sweep -> CSV
-tests/test_hnsw.cpp   unit/property tests
-scripts/              dataset download, hnswlib baseline, plotting, result summary, run_all.sh
-results/              CSVs, logs and plots produced by the benchmarks
-```
-
 ## Highlights
 
 * C++17, header-only HNSW index
