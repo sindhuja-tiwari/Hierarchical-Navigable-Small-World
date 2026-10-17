@@ -1,31 +1,12 @@
-// hnsw.h - Hierarchical Navigable Small World index (Malkov & Yashunin, 2016/2018)
-//
-// Header-only, C++17, no dependencies. L2 distance (squared). For cosine / angular
-// similarity, L2-normalise vectors before add()/search(); the ordering is identical.
-//
-// Algorithm references (paper numbering):
-//   Alg. 1  INSERT                -> Index::add()
-//   Alg. 2  SEARCH-LAYER          -> Index::search_layer()
-//   Alg. 4  SELECT-NEIGHBORS-HEURISTIC -> Index::select_neighbors()
-//   Alg. 5  K-NN-SEARCH           -> Index::search()
-//
-// Concurrency model (parallel build, lock-free-ish read path):
-//   * Every node has its own mutex that guards ITS neighbour lists (all layers).
-//   * A thread never holds more than one node lock at a time -> no lock-order deadlocks.
-//   * A global mutex is taken only by an insert that will raise the top layer, which
-//     serialises entry-point changes. All other inserts proceed concurrently.
-//   * Vector data and levels are written before a node is made reachable (the owner
-//     links itself first, then neighbours link back to it under their locks), so any
-//     thread that can reach a node sees fully initialised data.
-//   * Queries after the build finishes take NO locks (search_layer<false>).
-//     Do not call search() concurrently with add()/add_batch().
 #pragma once
 
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -37,8 +18,14 @@
 #include <utility>
 #include <vector>
 
-#if defined(__AVX2__) && defined(__FMA__)
+// SIMD backend: AVX2+FMA (x86-64), NEON (Apple Silicon / AArch64), else portable scalar.
+// Define HNSW_NO_SIMD to force the scalar kernel (useful for apples-to-apples comparisons).
+#if !defined(HNSW_NO_SIMD) && defined(__AVX2__) && defined(__FMA__)
+#define HNSW_USE_AVX2 1
 #include <immintrin.h>
+#elif !defined(HNSW_NO_SIMD) && defined(__aarch64__) && defined(__ARM_NEON)
+#define HNSW_USE_NEON 1
+#include <arm_neon.h>
 #endif
 
 namespace hnsw {
@@ -46,11 +33,22 @@ namespace hnsw {
 using node_t = uint32_t;   // internal id (insertion order of arrival)
 using label_t = uint64_t;  // user-visible id
 
+// Which distance kernel this translation unit was compiled with (printed by bench/tests/CI).
+inline const char* simd_backend() {
+#if defined(HNSW_USE_AVX2)
+    return "AVX2+FMA";
+#elif defined(HNSW_USE_NEON)
+    return "NEON";
+#else
+    return "scalar";
+#endif
+}
+
 // ---------------------------------------------------------------------------
-// Distance: squared L2. AVX2+FMA path when compiled with -march=native.
+// Distance: squared L2. AVX2+FMA (x86, -march=native) or NEON (arm64) when available.
 // ---------------------------------------------------------------------------
 inline float l2_sq(const float* a, const float* b, size_t d) {
-#if defined(__AVX2__) && defined(__FMA__)
+#if defined(HNSW_USE_AVX2)
     __m256 acc0 = _mm256_setzero_ps(), acc1 = _mm256_setzero_ps();
     size_t i = 0;
     for (; i + 16 <= d; i += 16) {
@@ -70,6 +68,25 @@ inline float l2_sq(const float* a, const float* b, size_t d) {
     lo = _mm_hadd_ps(lo, lo);
     lo = _mm_hadd_ps(lo, lo);
     float s = _mm_cvtss_f32(lo);
+    for (; i < d; ++i) {
+        float t = a[i] - b[i];
+        s += t * t;
+    }
+    return s;
+#elif defined(HNSW_USE_NEON)
+    float32x4_t acc0 = vdupq_n_f32(0.f), acc1 = vdupq_n_f32(0.f);
+    size_t i = 0;
+    for (; i + 8 <= d; i += 8) {
+        float32x4_t d0 = vsubq_f32(vld1q_f32(a + i), vld1q_f32(b + i));
+        float32x4_t d1 = vsubq_f32(vld1q_f32(a + i + 4), vld1q_f32(b + i + 4));
+        acc0 = vfmaq_f32(acc0, d0, d0);
+        acc1 = vfmaq_f32(acc1, d1, d1);
+    }
+    for (; i + 4 <= d; i += 4) {
+        float32x4_t d0 = vsubq_f32(vld1q_f32(a + i), vld1q_f32(b + i));
+        acc0 = vfmaq_f32(acc0, d0, d0);
+    }
+    float s = vaddvq_f32(vaddq_f32(acc0, acc1));
     for (; i < d; ++i) {
         float t = a[i] - b[i];
         s += t * t;
