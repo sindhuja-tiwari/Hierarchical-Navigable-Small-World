@@ -134,6 +134,7 @@ static void test_search_ordering() {
 }
 
 int main() {
+    std::printf("distance kernel: %s\n", hnsw::simd_backend());
     test_tiny();
     test_recall_and_invariants();
     test_self_query();
