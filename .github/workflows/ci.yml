@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-24.04 = x86-64 (AVX2 path); macos-latest = Apple Silicon (NEON path)
+        os: [ubuntu-24.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build
+        run: make all
+
+      - name: Unit and property tests (prints which SIMD kernel was compiled)
+        run: make test
+
+      - name: Benchmark smoke test (tiny synthetic run, not a performance measurement)
+        run: build/bench --synthetic 20000 64 200 --threads 2 --ef 20,100 --reps 1 --out /tmp/smoke.csv
+
+      # Compiled directly (not via a make target) so this step cannot fail on a stale Makefile.
+      - name: Scalar kernel (SIMD disabled)
+        run: |
+          mkdir -p build
+          ${CXX:-c++} -std=c++17 -O2 -DHNSW_NO_SIMD -pthread -Iinclude src/bench.cpp -o build/bench_scalar
+          build/bench_scalar --synthetic 10000 64 100 --threads 2 --ef 50 --reps 1 --out /tmp/scalar.csv
+
+      - name: AddressSanitizer + UBSan
+        run: make asan
+
+      - name: Allow ThreadSanitizer on newer Linux kernels
+        if: runner.os == 'Linux'
+        run: sudo sysctl vm.mmap_rnd_bits=28
+
+      - name: ThreadSanitizer
+        run: make tsan
