@@ -83,6 +83,7 @@ int main(int argc, char** argv) {
         ds::normalize(base);
         ds::normalize(queries);
     }
+    std::printf("kernel: %s\n", hnsw::simd_backend());
     std::printf("data: %zu base x %zu dim, %zu queries, metric=%s, threads=%zu\n", base.n, base.d, queries.n, metric.c_str(), threads);
 
     // ---- ground truth (cached to --gt if given) ------------------------------
