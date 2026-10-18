@@ -72,25 +72,28 @@ python3 scripts/plot.py results/sift_cpp.csv results/sift_hnswlib.csv -o results
 
 ### Results
 
-> These are **synthetic-data** results from a single-core machine. They validate the implementation
-> and the methodology; the SIFT1M / GloVe-100 results come from `scripts/run_all.sh` above.
-
-200k x 128-d Gaussian-mixture vectors, 1000 queries, M=16, efC=200, k=10, 1 thread, same data and
-ground truth for both implementations:
+SIFT1M (1,000,000 x 128-d, 10,000 queries), M=16, efC=200, k=10, single-threaded queries, on a
+MacBook Air with an Intel Core i5-8210Y (2 cores / 4 threads, AVX2). Both implementations use
+identical parameters and the same ground truth.
 
 | target recall@10 | hnsw-cpp (q/s) | hnswlib 0.8.0 (q/s) | ratio |
 |---|---|---|---|
-| 0.90 | 8,608 | 8,708 | 0.99x |
-| 0.95 | 6,420 | 6,667 | 0.96x |
-| 0.99 | 4,414 | 4,300 | 1.03x |
+| 0.90 | 6,285 | 5,637 | 1.11x |
+| 0.95 | 4,025 | 3,882 | 1.04x |
+| 0.99 | 1,708 | 1,661 | 1.03x |
 
-QPS is interpolated at fixed recall, since the two graphs reach slightly different recall at the
-same `ef`. Raw sweeps are in `results/`. Single-thread build of 200k points: 48.6 s (hnsw-cpp) vs
-54.5 s (hnswlib). Caveats: synthetic data, one machine; the timing harnesses differ (a C++ per-query
-loop vs hnswlib's batched call from Python); hnswlib dispatches AVX/AVX-512 at runtime while this
-uses AVX2+FMA. On Apple Silicon hnswlib has no hand-written NEON kernel, so a ratio above 1.0 there
-partly reflects kernel quality, not graph quality; compare against `build/bench_scalar` for an
-algorithm-only view.
+At equal `ef` the two graphs reach the same recall: the largest gap across the sweep is 0.003
+(e.g. 0.9263 vs 0.9268 at ef=40, 0.9954 vs 0.9956 at ef=200). QPS is interpolated at fixed recall.
+Build with 8 worker threads on the 2-core / 4-thread CPU: 427 s (hnsw-cpp) vs 414 s (hnswlib);
+hnsw-cpp single-thread build is 923 s, a 2.2x speedup. The 1M-point parallel build has 0
+unreachable nodes.
+
+![SIFT1M recall vs QPS](results/sift.png)
+
+Caveats: one low-power laptop, so absolute numbers and timing noise differ from a server; the
+timing harnesses differ (C++ per-query loop vs hnswlib's batched call from Python). Multi-thread
+query throughput is not reported: hnsw-cpp currently reaches 65-90% of hnswlib's multi-thread QPS
+on this machine and the cause is under investigation.
 
 ## Design notes
 
