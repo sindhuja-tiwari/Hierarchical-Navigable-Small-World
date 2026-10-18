@@ -1,0 +1,108 @@
+make: Nothing to be done for `all'.
+build/test_hnsw
+tiny / edge cases
+recall + invariants (single thread, 5k x 32d)
+  recall@10 ef=10: 0.9320   ef=100: 1.0000   levels=2  avg deg0=18.0
+exact self match
+parallel build (8 threads) matches serial quality
+  serial recall@10=1.0000  parallel recall@10=0.9995
+result ordering
+
+all tests passed
+datasets ready in data/
+data: 1000000 base x 128 dim, 10000 queries, metric=l2, threads=8
+ground truth: loaded data/sift_gt.ivecs (10000 x 100)
+build: M=16 efC=200 threads=8 -> 427.46s (2339 inserts/s), 648.5 MB, levels=6, avg deg0=21.1, unreachable=0
+build: 1 thread -> 922.62s, speedup with 8 threads = 2.16x
+
+    ef  recall@k  QPS (1 thr)    QPS (all)    p50 us    p99 us
+    10    0.7075        13696        26240      63.0     250.0
+    20    0.8379         8503        15977     101.0     458.6
+    30    0.8953         6547        12509     134.8     534.1
+    40    0.9263         5007        10741     169.5     780.6
+    60    0.9588         3712         7822     238.8     879.2
+    80    0.9744         2875         5706     309.1    1172.6
+   120    0.9876         2045         4052     441.4    1610.3
+   200    0.9954         1139         1691     721.5    3372.5
+   300    0.9979          820         1686    1033.7    4188.5
+   500    0.9989          575         1185    1652.3    4141.8
+   800    0.9992          390          731    2459.8    6559.9
+
+wrote results/sift_cpp.csv
+hnswlib build: M=16 efC=200 threads=8 -> 414.03s
+    ef  recall@k  QPS (1 thr)    QPS (all)
+    10    0.7100        10728        32065
+    20    0.8386         7475        20694
+    30    0.8956         5838        15475
+    40    0.9268         4548        13109
+    60    0.9593         3643         8272
+    80    0.9746         2891         6674
+   120    0.9879         1895         5391
+   200    0.9956         1173         2618
+   300    0.9981          797         1850
+   500    0.9990          493         1320
+   800    0.9992          312         1003
+wrote results/sift_hnswlib.csv
+wrote results/sift.png
+
+QPS at fixed recall@10 (interpolated, qps_1t):
+recall        hnsw-cpp     hnswlib             ratio
+0.90              6285        5637             1.11x
+0.95              4025        3882             1.04x
+0.99              1708        1661             1.03x
+data: 1183514 base x 100 dim, 10000 queries, metric=angular, threads=8
+ground truth: loaded data/glove_gt.ivecs (10000 x 100)
+build: M=16 efC=200 threads=8 -> 571.71s (2070 inserts/s), 635.0 MB, levels=6, avg deg0=23.0, unreachable=0
+build: 1 thread -> 1340.23s, speedup with 8 threads = 2.34x
+
+    ef  recall@k  QPS (1 thr)    QPS (all)    p50 us    p99 us
+    10    0.4684         7875        13485      92.4     583.8
+    20    0.5920         3679         9098     179.0    1810.4
+    30    0.6577         4218         7982     182.1    1278.5
+    40    0.7004         3424         6550     233.1    1502.0
+    60    0.7522         2525         4434     314.6    2287.8
+    80    0.7851         2016         3788     399.3    2547.8
+   120    0.8240         1867         3904     529.6     885.9
+   200    0.8665         1182         2523     841.8    1417.4
+   300    0.8945          833         1781    1219.5    1733.0
+   500    0.9239          523         1105    1950.5    2851.6
+   800    0.9460          340          693    3009.6    4163.3
+
+wrote results/glove_cpp.csv
+hnswlib build: M=16 efC=200 threads=8 -> 467.75s
+    ef  recall@k  QPS (1 thr)    QPS (all)
+    10    0.4748        11056        28127
+    20    0.5980         6970        18022
+    30    0.6624         5173        13609
+    40    0.7049         4289        11042
+    60    0.7551         3165         8144
+    80    0.7873         2520         6431
+   120    0.8263         1807         4675
+   200    0.8664         1175         2266
+   300    0.8941          681         1721
+   500    0.9241          391         1237
+   800    0.9463          334          854
+wrote results/glove_hnswlib.csv
+wrote results/glove.png
+
+QPS at fixed recall@10 (interpolated, qps_1t):
+recall        hnsw-cpp     hnswlib             ratio
+0.90               764         610             1.25x
+0.95                 -           -
+0.99                 -           -
+
+=== SIFT1M: numbers ===
+QPS @ recall@10=0.95: hnsw-cpp 4,025 | hnswlib 3,882 | ratio 1.04x
+
+=== SIFT1M: resume bullets (edit to taste) ===
+- Implemented HNSW approximate nearest-neighbour search from scratch in C++17 (layered graph, heuristic neighbour selection, multithreaded lock-per-node build, 2.2x build speedup on 8 threads); reaches 0.95 recall@10 on SIFT1M at 4,025 queries/s/thread, within 4% of hnswlib (3,882 q/s).
+- Validated with ASan/UBSan/TSan; diagnosed and fixed graph orphaning caused by concurrent inserts (unreachable nodes after parallel builds), restoring full layer-0 connectivity.
+  (p99 single-query latency at that recall: 879 us)
+
+=== SIFT1M: markdown table for the README ===
+| target recall@10 | hnsw-cpp (q/s) | hnswlib (q/s) | ratio |
+|---|---|---|---|
+| 0.90 | 6,285 | 5,637 | 1.11x |
+| 0.95 | 4,025 | 3,882 | 1.04x |
+| 0.99 | 1,708 | 1,661 | 1.03x |
+sweep never reaches recall 0.95; widen --ef (max recall: cpp 0.946, lib 0.946)
