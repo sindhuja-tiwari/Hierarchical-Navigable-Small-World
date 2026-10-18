@@ -1,398 +1,143 @@
 # HNSW in C++17
 
+[![CI](https://github.com/sindhuja-tiwari/Hierarchical-Navigable-Small-World/actions/workflows/ci.yml/badge.svg)](https://github.com/sindhuja-tiwari/Hierarchical-Navigable-Small-World/actions/workflows/ci.yml)
+
 A from-scratch **HNSW** (Hierarchical Navigable Small World) approximate nearest-neighbour index,
 built from the original paper (Malkov & Yashunin). Header-only, no dependencies, with a
-multithreaded build, lock-free queries, an AVX2 distance kernel, a correctness suite that also runs
-under ASan / UBSan / TSan, and a benchmark harness that measures **recall@10 vs queries-per-second**
-against [hnswlib](https://github.com/nmslib/hnswlib) on the same data and ground truth.
+multithreaded build, lock-free queries, SIMD distance kernels (AVX2 on x86, NEON on Apple Silicon),
+a correctness suite that also runs under ASan / UBSan / TSan, and a benchmark harness that measures
+**recall@10 vs queries-per-second** against [hnswlib](https://github.com/nmslib/hnswlib) on the same
+data and ground truth. CI builds and tests on Linux (x86-64) and macOS (Apple Silicon).
 
-## Highlights
+![recall vs QPS](results/recall_vs_qps.png)
 
-* C++17, header-only HNSW index
-* No runtime dependencies for the core index
-* L2 distance with an AVX2+FMA fast path and portable scalar fallback
-* Multithreaded index construction
-* Lock-free queries after construction
-* Deterministic level generation from `(seed, internal_id)`
-* Flat layer-0 adjacency storage for better locality
-* Best-first search with configurable `ef`
-* Parallel brute-force ground truth generation
-* Correctness and invariant tests
-* Benchmark harness comparing against `hnswlib`
-* Recall@10, single-thread QPS, multi-thread QPS, p50 and p99 latency
-* SIFT1M and GloVe-100 benchmark datasets
+```
+include/hnsw.h        the index (~550 lines)
+include/dataset.h     fvecs/ivecs IO, synthetic data, parallel brute-force ground truth
+src/bench.cpp         recall@k vs QPS sweep -> CSV
+tests/test_hnsw.cpp   unit/property tests
+scripts/              dataset download, hnswlib baseline, plotting, result summary, run_all.sh
+results/              CSVs, logs and plots produced by the benchmarks
+```
 
 ## Quick start
 
-### Build
-
-Requires a C++17 compiler and `make`.
-
-```bash
-make
-```
-
-On macOS, Apple Clang works out of the box:
+Needs a C++17 compiler (g++ or clang) and `make`. Linux, macOS (Intel or Apple Silicon) or WSL.
+On macOS run `xcode-select --install` once.
 
 ```bash
-make CXX=clang++
+make            # builds build/bench and build/test_hnsw  (-O3, native SIMD)
+make test       # correctness suite
+make asan tsan  # same suite under AddressSanitizer+UBSan / ThreadSanitizer
+make scalar     # bench with SIMD disabled (build/bench_scalar), to separate algorithm from kernel
 ```
-
-### Run tests
-
-```bash
-make test
-```
-
-The test suite covers:
-
-* tiny and edge-case indexes
-* exact self matches
-* recall against brute-force ground truth
-* graph invariants
-* result ordering
-* parallel-build quality
-
-Example output:
-
-```text
-tiny / edge cases
-recall + invariants (single thread, 5k x 32d)
-  recall@10 ef=10: 0.9320   ef=100: 1.0000  levels=2  avg deg0=18.0
-exact self match
-parallel build (8 threads) matches serial quality
-result ordering
-
-all tests passed
-```
-
-## Using the index
-
-The core API is intentionally small:
 
 ```cpp
-hnsw::Index::Params p;
-p.dim = 128;
-p.max_elements = 1'000'000;
-p.M = 16;
-p.ef_construction = 200;
+#include "hnsw.h"
 
+hnsw::Index::Params p;
+p.dim = 128; p.max_elements = 1'000'000; p.M = 16; p.ef_construction = 200;
 hnsw::Index index(p);
 
-index.add_batch(vectors, n, /*threads=*/8);
-
-auto hits = index.search(
-    query,
-    /*k=*/10,
-    /*ef=*/100
-);
+index.add_batch(vectors, n, /*threads=*/8);             // row-major float*, label = row number
+auto hits = index.search(query, /*k=*/10, /*ef=*/100);  // vector<pair<squared_dist, label>>, ascending
 ```
 
-Search results are returned in ascending distance order.
+`ef` is the recall/speed knob: larger means higher recall and slower queries. For cosine / angular
+similarity, L2-normalise vectors first (the nearest-neighbour ordering is identical).
 
-For cosine/angular similarity, normalize vectors to unit length before indexing. The resulting nearest-neighbor ordering is equivalent to angular similarity.
+## Benchmarks
 
-## Benchmarking
-
-The repository includes a reproducible benchmark harness for comparing this implementation with [`hnswlib`](https://github.com/nmslib/hnswlib).
-
-The benchmark configuration used for the reported results is:
-
-| Parameter        |  Value |
-| ---------------- | -----: |
-| `M`              |     16 |
-| `efConstruction` |    200 |
-| `k`              |     10 |
-| Query `ef`       | 10–800 |
-| Build threads    |      4 |
-| Queries          | 10,000 |
-
-Datasets:
-
-* **SIFT1M:** 1,000,000 vectors × 128 dimensions, L2 distance
-* **GloVe-100:** 1,183,514 vectors × 100 dimensions, angular distance
-
-The benchmark records:
-
-* recall@10
-* single-thread query QPS
-* multi-thread query QPS
-* p50 latency
-* p99 latency
-* build time
-* memory usage
-
-Raw CSVs, logs, plots, and the recorded environment are available under [`results/`](results/).
-
-### Reproducing the benchmark
-
-Create the Python environment:
+### Run on the standard datasets (SIFT1M, GloVe-100)
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-
+python3 -m venv .venv && source .venv/bin/activate
 pip install numpy matplotlib h5py hnswlib
+scripts/run_all.sh 8        # 8 = number of threads
 ```
 
-Then run:
+This builds, runs the tests, downloads both datasets from ann-benchmarks (ground truth included),
+benchmarks hnsw-cpp and hnswlib with identical parameters (M=16, efC=200, k=10), writes CSVs, logs
+and plots to `results/`, and prints a summary table. Query throughput is measured one query at a
+time on a single thread (the ann-benchmarks convention); multi-thread throughput is also recorded
+(`qps_mt` column). Manual use of the individual tools:
 
 ```bash
-scripts/run_all.sh 4
+build/bench --base data/sift_base.fvecs --query data/sift_query.fvecs --gt data/sift_gt.ivecs \
+            --metric l2 --M 16 --efc 200 --threads 8 --compare-build --out results/sift_cpp.csv
+python3 scripts/bench_hnswlib.py --base data/sift_base.fvecs --query data/sift_query.fvecs \
+            --gt data/sift_gt.ivecs --M 16 --efc 200 --threads 8 --out results/sift_hnswlib.csv
+python3 scripts/plot.py results/sift_cpp.csv results/sift_hnswlib.csv -o results/sift.png
 ```
 
-The script:
+### Results
 
-1. builds the C++ implementation
-2. runs the correctness tests
-3. downloads the benchmark datasets when needed
-4. converts GloVe HDF5 data to `fvecs`
-5. runs hnsw-cpp
-6. runs hnswlib with the same HNSW parameters
-7. generates CSV results and plots
-8. writes benchmark logs and summary information
+> These are **synthetic-data** results from a single-core machine. They validate the implementation
+> and the methodology; the SIFT1M / GloVe-100 results come from `scripts/run_all.sh` above.
 
-> **Runtime note:** the full benchmark can take many hours on a laptop because `--compare-build` also measures a single-thread build of the full datasets. The reported run was performed on a 4-core Intel Mac.
+200k x 128-d Gaussian-mixture vectors, 1000 queries, M=16, efC=200, k=10, 1 thread, same data and
+ground truth for both implementations:
 
-Datasets are intentionally excluded from Git via `.gitignore`.
+| target recall@10 | hnsw-cpp (q/s) | hnswlib 0.8.0 (q/s) | ratio |
+|---|---|---|---|
+| 0.90 | 8,608 | 8,708 | 0.99x |
+| 0.95 | 6,420 | 6,667 | 0.96x |
+| 0.99 | 4,414 | 4,300 | 1.03x |
 
-## Measured results
-
-The following results were measured on an Intel Mac, x86_64, with Apple Clang 16, using four build/query threads.
-
-### SIFT1M
-
-Configuration:
-
-* 1,000,000 × 128-d vectors
-* L2 distance
-* `M=16`
-* `efConstruction=200`
-* 10,000 queries
-* 4-thread build
-
-#### Build
-
-| Implementation      |   Build time |
-| ------------------- | -----------: |
-| hnsw-cpp, 4 threads | **415.96 s** |
-| hnsw-cpp, 1 thread  | **676.70 s** |
-
-This corresponds to a **1.63× build speedup** from four threads.
-
-#### Query performance
-
-At approximately fixed recall, hnsw-cpp achieved higher single-thread query throughput in the measured SIFT run:
-
-| Target recall@10 | hnsw-cpp QPS | hnswlib QPS |     Ratio |
-| ---------------: | -----------: | ----------: | --------: |
-|             0.90 |        7,462 |       5,186 | **1.44×** |
-|             0.95 |        4,676 |       3,842 | **1.22×** |
-|             0.99 |        1,990 |       1,863 | **1.07×** |
-
-The raw sweep is available in:
-
-```text
-results/sift_cpp.csv
-results/sift_hnswlib.csv
-```
-
-### SIFT recall/QPS
-
-![SIFT1M recall vs QPS](results/sift.png)
-
-### GloVe-100
-
-Configuration:
-
-* 1,183,514 × 100-d vectors
-* angular distance
-* `M=16`
-* `efConstruction=200`
-* 10,000 queries
-* 4-thread build
-
-#### Build
-
-| Implementation      |   Build time |
-| ------------------- | -----------: |
-| hnsw-cpp, 4 threads | **456.70 s** |
-| hnswlib, 4 threads  | **648.20 s** |
-
-For hnsw-cpp, the measured four-thread build was **98.26× faster than its own single-thread comparison build** on this dataset. The single-thread GloVe comparison build took approximately 12.5 hours, so build-thread comparisons should be interpreted in the context of this implementation and machine rather than as a general claim about HNSW libraries.
-
-#### Query performance
-
-GloVe reached approximately 0.90 recall at:
-
-| Target recall@10 | hnsw-cpp QPS | hnswlib QPS |     Ratio |
-| ---------------: | -----------: | ----------: | --------: |
-|             0.90 |          745 |         633 | **1.18×** |
-
-The maximum measured recall in this sweep was approximately 0.946 for both implementations.
-
-Raw results are available in:
-
-```text
-results/glove_cpp.csv
-results/glove_hnswlib.csv
-```
-
-### GloVe recall/QPS
-
-![GloVe-100 recall vs QPS](results/glove.png)
-
-## Benchmark interpretation
-
-These results are **measurements from one machine**, not universal performance claims.
-
-The benchmark is intended to answer a practical question:
-
-> How does a compact from-scratch HNSW implementation behave relative to a mature C++ HNSW implementation under the same graph parameters and dataset?
-
-The comparison is strongest when looking at the complete recall/QPS curves rather than a single operating point.
-
-The raw measurements are committed under `results/` so the reported numbers can be inspected rather than treated as headline-only claims.
+QPS is interpolated at fixed recall, since the two graphs reach slightly different recall at the
+same `ef`. Raw sweeps are in `results/`. Single-thread build of 200k points: 48.6 s (hnsw-cpp) vs
+54.5 s (hnswlib). Caveats: synthetic data, one machine; the timing harnesses differ (a C++ per-query
+loop vs hnswlib's batched call from Python); hnswlib dispatches AVX/AVX-512 at runtime while this
+uses AVX2+FMA. On Apple Silicon hnswlib has no hand-written NEON kernel, so a ratio above 1.0 there
+partly reflects kernel quality, not graph quality; compare against `build/bench_scalar` for an
+algorithm-only view.
 
 ## Design notes
 
-### Hierarchical graph structure
+**Structure.** Each point gets a max layer `floor(-ln(U) / ln M)`. Layer 0 holds every point with up
+to `2M` links; layers >= 1 hold exponentially fewer points with up to `M` links. The level is a pure
+function of `(seed, internal id)` (splitmix64), so there is no shared RNG to contend on.
 
-Each point is assigned a maximum layer using a geometric distribution:
+**Search (paper Alg. 5).** Greedy 1-NN descent from the entry point through the upper layers, then a
+best-first search on layer 0 that keeps the `ef` closest elements.
 
-```text
-floor(-ln(U) / ln(M))
-```
+**Neighbour selection (Alg. 4).** The heuristic keeps a candidate only if it is closer to the new
+point than to every neighbour already kept. That spreads edges across directions instead of taking
+the M nearest (which all sit in one cluster) and keeps clustered data navigable. The same heuristic
+shrinks a neighbour's list when a reverse edge overflows it.
 
-The level is generated from a `splitmix64`-based function of the seed and internal ID, avoiding contention around a shared random-number generator.
+**Memory layout.** Vectors are one contiguous array. Layer-0 links are a flat `[count, ids...]`
+block per node (no pointer chasing); upper layers are per-node vectors since few nodes have them.
+Neighbour vectors are software-prefetched before the distance loop, and the visited set resets in
+O(1) with an epoch counter in a `thread_local` array.
 
-Layer 0 contains every point and supports up to `2M` connections. Higher layers contain progressively fewer points and support up to `M` connections.
+**Concurrency.**
+- One mutex per node guards that node's neighbour lists. A thread holds at most one node lock at a
+  time, so lock-order deadlock cannot happen by construction.
+- A global mutex is taken only by an insert that will raise the top layer (rare).
+- A node's vector and level are written before it becomes reachable: it links itself first, then its
+  neighbours link back. Queries after the build take no locks.
+- The test suite is clean under ThreadSanitizer, AddressSanitizer and UBSan.
 
-### Search
+**Concurrent inserts can orphan nodes.** Two inserts running at the same moment cannot see each
+other, so one can be pruned out of every neighbour list and end up (with anything only reachable
+through it) with no path from the entry point. In an 8-thread build of 20k points this affected
+0.1-0.5% of nodes (serial builds: about 0-0.02%), growing with thread count. It is an algorithmic
+effect, not a data race: TSan is clean, and running 8 threads with every `add()` behind one big lock
+reproduces the serial result. `repair_connectivity()` runs at the end of `add_batch`: for each orphan
+it finds the nearest reachable nodes and adds an edge from the first one that can spare a slot
+without orphaning anyone else (target in-degree > 1). After repair the parallel builds I tested had 0
+unreachable nodes and recall within about 0.5% of serial.
 
-Search follows the standard HNSW structure:
+## Limitations and next steps
 
-1. Greedy 1-nearest-neighbor descent through the upper layers.
-2. Best-first exploration at layer 0.
-3. Maintain the closest `ef` candidates.
-4. Return the best `k` results.
-
-Increasing `ef` generally increases recall while reducing query throughput.
-
-### Neighbor selection
-
-The implementation uses the HNSW diversity heuristic rather than simply taking the nearest `M` candidates.
-
-This encourages edges to span different directions in the local neighborhood, improving navigability on clustered data.
-
-Reverse edges are also pruned when a neighbor list exceeds its capacity.
-
-### Memory layout
-
-Vectors are stored in one contiguous array.
-
-Layer-0 adjacency is stored as flat per-node blocks rather than pointer-heavy graph objects. Upper-layer adjacency uses per-node vectors because relatively few nodes reach those levels.
-
-The search path also uses:
-
-* software prefetching for neighbor data
-* an epoch-based visited set
-* `thread_local` search state
-
-These choices reduce allocation and pointer-chasing overhead in the hot path.
-
-## Concurrency
-
-Index construction uses fine-grained locking:
-
-* one mutex per node protects its neighbor lists
-* at most one node lock is held by an insertion at a time
-* a global lock is used only when an insertion raises the maximum graph level
-* queries after construction require no locks
-
-The implementation also performs a connectivity-repair pass after parallel construction.
-
-Concurrent insertion can otherwise produce an algorithmic issue where two simultaneous insertions fail to see one another, allowing a node to become unreachable from the entry point. This is not a data race.
-
-The repair pass reconnects orphaned nodes to reachable neighbors when possible.
-
-The test suite also includes parallel-build quality checks.
-
-## Testing
-
-The repository includes correctness and stress tests for:
-
-* graph construction
-* recall against brute-force search
-* exact self-match behavior
-* result ordering
-* graph invariants
-* serial vs parallel construction quality
-
-Sanitizer targets are available through the Makefile:
-
-```bash
-make asan
-make tsan
-```
-
-These targets are intended for local correctness/debugging runs.
-
-## Project structure
-
-```text
-.
-├── include/
-│   ├── hnsw.h          # HNSW index implementation
-│   └── dataset.h       # fvecs/ivecs I/O and dataset utilities
-├── src/
-│   └── bench.cpp       # C++ benchmark harness
-├── tests/
-│   └── test_hnsw.cpp   # correctness and invariant tests
-├── scripts/
-│   ├── fetch_data.sh
-│   ├── hdf5_to_fvecs.py
-│   ├── bench_hnswlib.py
-│   ├── plot.py
-│   ├── summarize.py
-│   └── run_all.sh
-├── results/
-│   ├── *.csv            # raw benchmark data
-│   ├── *.log            # benchmark logs
-│   ├── *.png            # recall/QPS plots
-│   └── environment.txt # recorded benchmark environment
-├── Makefile
-└── README.md
-```
-
-## Limitations
-
-This implementation is intentionally focused rather than feature-complete.
-
-Current limitations:
-
-* L2 distance is implemented directly; angular/cosine search uses normalized vectors
-* no inner-product metric
-* no deletion
-* no update operation
-* no persistence/save/load
-* fixed index capacity
-* parallel builds are not bit-for-bit reproducible because insertion order depends on thread scheduling
-* AVX2+FMA acceleration is provided, but there is no AVX-512 or ARM NEON implementation
-
-## Possible next steps
-
-Potential extensions include:
-
-* persistence with `save()` / `load()`
-* dynamic resizing
-* deletion/update support
-* additional distance metrics
-* AVX-512 and ARM NEON kernels
-* scalar/int8 quantization
-* further profiling of the remaining performance gap to mature HNSW implementations
-* additional connectivity and concurrency strategies
+- L2 only (cosine via normalisation). No inner-product metric, deletion, update or persistence.
+- Fixed capacity (`max_elements`), no resizing.
+- Parallel builds are not bit-reproducible (internal ids follow thread arrival order).
+- Distance kernels: AVX2+FMA, NEON, or portable scalar; no AVX-512 path.
+- Ideas with measurable payoffs: `keepPrunedConnections`, int8 / scalar quantisation (memory vs
+  recall), `save()` / `load()`, and a profile-guided look at the remaining gap to hnswlib.
 
 ## License
 
-MIT License.
+MIT
