@@ -95,6 +95,38 @@ timing harnesses differ (C++ per-query loop vs hnswlib's batched call from Pytho
 query throughput is not reported: hnsw-cpp currently reaches 65-90% of hnswlib's multi-thread QPS
 on this machine and the cause is under investigation.
 
+### GloVe-100 (angular)
+
+GloVe-100 (1,183,514 x 100-d, 10,000 queries, vectors L2-normalised so L2 ordering equals angular
+ordering), M=16, efC=200, k=10, single-threaded queries, same machine, parameters and ground truth
+for both implementations.
+
+| ef | recall@10 hnsw-cpp | recall@10 hnswlib | q/s hnsw-cpp | q/s hnswlib |
+|---|---|---|---|---|
+| 40 | 0.7004 | 0.7049 | 3,424 | 4,289 |
+| 120 | 0.8240 | 0.8263 | 1,867 | 1,807 |
+| 300 | 0.8945 | 0.8941 | 833 | 681 |
+| 500 | 0.9239 | 0.9241 | 523 | 391 |
+| 800 | 0.9460 | 0.9463 | 340 | 334 |
+
+Recall: the two graphs agree within 0.006 at every `ef` (hnswlib slightly higher at ef <= 40) and
+within 0.0004 for ef >= 200. The sweep tops out at 0.946 recall@10 for both libraries (ef=800), so
+**the 0.95 and 0.99 recall points were not reached** and are not reported.
+
+Throughput: at the one recall level inside the sweep that both libraries bracket, 0.90 recall@10,
+hnsw-cpp measured 764 q/s against hnswlib's 610 q/s (1.25x, interpolated). The run was noisy
+(throughput is not monotonic in `ef` for hnsw-cpp), and hnsw-cpp is slower than hnswlib at low
+`ef` here, so treat GloVe throughput as inconclusive rather than as a speedup; the recall result
+is the reliable comparison. Build with 8 worker threads on the 2-core / 4-thread CPU: 572 s
+(hnsw-cpp) vs 468 s (hnswlib); hnsw-cpp single-thread build is 1,340 s, a 2.3x speedup. The
+parallel build has 0 unreachable nodes.
+
+![GloVe-100 recall vs QPS](results/glove.png)
+
+Raw sweeps: [SIFT1M hnsw-cpp](results/sift_cpp.csv), [SIFT1M hnswlib](results/sift_hnswlib.csv),
+[GloVe hnsw-cpp](results/glove_cpp.csv), [GloVe hnswlib](results/glove_hnswlib.csv). Run logs are
+in `results/`.
+
 ## Design notes
 
 **Structure.** Each point gets a max layer `floor(-ln(U) / ln M)`. Layer 0 holds every point with up
