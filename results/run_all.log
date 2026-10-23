@@ -93,11 +93,8 @@ recall        hnsw-cpp     hnswlib             ratio
 
 === SIFT1M: numbers ===
 QPS @ recall@10=0.95: hnsw-cpp 4,025 | hnswlib 3,882 | ratio 1.04x
-
-=== SIFT1M: resume bullets (edit to taste) ===
-- Implemented HNSW approximate nearest-neighbour search from scratch in C++17 (layered graph, heuristic neighbour selection, multithreaded lock-per-node build, 2.2x build speedup on 8 threads); reaches 0.95 recall@10 on SIFT1M at 4,025 queries/s/thread, within 4% of hnswlib (3,882 q/s).
-- Validated with ASan/UBSan/TSan; diagnosed and fixed graph orphaning caused by concurrent inserts (unreachable nodes after parallel builds), restoring full layer-0 connectivity.
-  (p99 single-query latency at that recall: 879 us)
+build: 2.2x build speedup on 8 threads
+p99 single-query latency at that recall: 879 us
 
 === SIFT1M: markdown table for the README ===
 | target recall@10 | hnsw-cpp (q/s) | hnswlib (q/s) | ratio |

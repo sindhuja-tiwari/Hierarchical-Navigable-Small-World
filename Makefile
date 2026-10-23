@@ -16,6 +16,10 @@ $(BUILD):
 test: $(BUILD)/test_hnsw
 	$(BUILD)/test_hnsw
 
+# bench with SIMD disabled, to separate the algorithm from the distance kernel
+scalar: | $(BUILD)
+	$(CXX) $(CXXFLAGS) -DHNSW_NO_SIMD $(INC) src/bench.cpp -o $(BUILD)/bench_scalar
+
 # sanitizer builds of the test suite (-O1 for usable stack traces)
 tsan:
 	mkdir -p $(BUILD) && $(CXX) -std=c++17 -O1 -g -fsanitize=thread -pthread $(INC) tests/test_hnsw.cpp -o $(BUILD)/test_tsan && $(BUILD)/test_tsan
@@ -25,4 +29,4 @@ asan:
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all test tsan asan clean
+.PHONY: all test scalar tsan asan clean

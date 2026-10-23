@@ -9,10 +9,10 @@ a correctness suite that also runs under ASan / UBSan / TSan, and a benchmark ha
 **recall@10 vs queries-per-second** against [hnswlib](https://github.com/nmslib/hnswlib) on the same
 data and ground truth. CI builds and tests on Linux (x86-64) and macOS (Apple Silicon).
 
-![recall vs QPS](results/recall_vs_qps.png)
+![SIFT1M recall@10 vs queries per second, hnsw-cpp vs hnswlib](results/sift.png)
 
 ```
-include/hnsw.h        the index (~550 lines)
+include/hnsw.h        the index (~600 lines)
 include/dataset.h     fvecs/ivecs IO, synthetic data, parallel brute-force ground truth
 src/bench.cpp         recall@k vs QPS sweep -> CSV
 tests/test_hnsw.cpp   unit/property tests
@@ -88,7 +88,6 @@ Build with 8 worker threads on the 2-core / 4-thread CPU: 427 s (hnsw-cpp) vs 41
 hnsw-cpp single-thread build is 923 s, a 2.2x speedup. The 1M-point parallel build has 0
 unreachable nodes.
 
-![SIFT1M recall vs QPS](results/sift.png)
 
 Caveats: one low-power laptop, so absolute numbers and timing noise differ from a server; the
 timing harnesses differ (C++ per-query loop vs hnswlib's batched call from Python). Multi-thread
@@ -164,6 +163,15 @@ it finds the nearest reachable nodes and adds an edge from the first one that ca
 without orphaning anyone else (target in-degree > 1). After repair the parallel builds I tested had 0
 unreachable nodes and recall within about 0.5% of serial.
 
+**Exact duplicate vectors.** A copy of the point being inserted is at distance 0, so the
+heuristic would keep every copy (they sort first and prune nothing) until the list is full, and
+each group of copies would become an island. With 50 vectors x 100 copies this left 98% of
+nodes unreachable. Copies now get at most a quarter of a node's slots up front, never prune
+other candidates, and only top up slots the heuristic leaves free; which copies a node keeps is
+hashed so newer copies still get in-edges. Data without exact duplicates builds the same graph
+as before. `add_batch` returns the number of nodes still unreachable after repair (0 in every
+test).
+
 ## Limitations and next steps
 
 - L2 only (cosine via normalisation). No inner-product metric, deletion, update or persistence.
@@ -175,4 +183,4 @@ unreachable nodes and recall within about 0.5% of serial.
 
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).

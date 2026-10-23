@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Plot recall@k (x) vs queries/sec (y, log) for one or more result CSVs, ann-benchmarks style.
 
-  python3 scripts/plot.py results/hnsw_cpp.csv results/hnswlib.csv -o results/recall_vs_qps.png \
+  python3 scripts/plot.py results/hnsw_cpp.csv results/hnswlib.csv -o results/sift.png \
       --title "SIFT-128, M=16, efC=200, k=10"
 """
 import argparse
@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 ap = argparse.ArgumentParser()
 ap.add_argument("csvs", nargs="+")
-ap.add_argument("-o", "--out", default="results/recall_vs_qps.png")
+ap.add_argument("-o", "--out", default="results/sift.png")
 ap.add_argument("--title", default="recall@10 vs QPS")
 ap.add_argument("--col", default="qps_1t", choices=["qps_1t", "qps_mt"])
 ap.add_argument("--xmin", type=float, default=0.90)

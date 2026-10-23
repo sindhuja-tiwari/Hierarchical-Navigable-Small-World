@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turn benchmark CSVs/logs into resume-ready numbers. Nothing is hard-coded: every figure
+"""Turn benchmark CSVs/logs into a short summary and a README table. Nothing is hard-coded: every figure
 printed comes from the files you pass in.
 
   python3 scripts/summarize.py --name SIFT1M --cpp results/sift_cpp.csv \
@@ -35,23 +35,17 @@ qc, ql = qps_at(cpp, a.target), qps_at(lib, a.target)
 if not (qc and ql):
     raise SystemExit(f"sweep never reaches recall {a.target}; widen --ef (max recall: cpp {cpp[-1][0]:.3f}, lib {lib[-1][0]:.3f})")
 ratio = qc / ql
-pct = abs(1 - ratio) * 100
-rel = "within %.0f%% of" % pct if pct >= 1 else "on par with"
 p99 = next((float(r["p99_us"]) for r in cpp_rows if float(r["recall"]) >= a.target), None)
 
-speed = ""
+speed = None
 if a.log:
     m = re.search(r"speedup with (\d+) threads = ([\d.]+)x", open(a.log).read())
     if m:
-        speed = f", {float(m.group(2)):.1f}x build speedup on {m.group(1)} threads"
+        speed = f"{float(m.group(2)):.1f}x build speedup on {m.group(1)} threads"
 
 print(f"\n=== {a.name}: numbers ===")
 print(f"QPS @ recall@10={a.target}: hnsw-cpp {qc:,.0f} | hnswlib {ql:,.0f} | ratio {ratio:.2f}x")
-print(f"\n=== {a.name}: resume bullets (edit to taste) ===")
-print(f"- Implemented HNSW approximate nearest-neighbour search from scratch in C++17 (layered graph, heuristic neighbour "
-      f"selection, multithreaded lock-per-node build{speed}); reaches {a.target:.2f} recall@10 on {a.name} at "
-      f"{qc:,.0f} queries/s/thread, {rel} hnswlib ({ql:,.0f} q/s).")
-print("- Validated with ASan/UBSan/TSan; diagnosed and fixed graph orphaning caused by concurrent inserts "
-      "(unreachable nodes after parallel builds), restoring full layer-0 connectivity.")
+if speed:
+    print(f"build: {speed}")
 if p99:
-    print(f"  (p99 single-query latency at that recall: {p99:.0f} us)")
+    print(f"p99 single-query latency at that recall: {p99:.0f} us")
