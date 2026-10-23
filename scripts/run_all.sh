@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # One-shot: build, download SIFT1M + GloVe-100, benchmark hnsw-cpp and hnswlib on both,
-# plot, and print resume bullets filled from the measured numbers.
+# plot, and print a summary of the measured numbers.
 #   scripts/run_all.sh [threads]        (default: all cores)
 # Needs: g++, make, python3 with numpy, matplotlib, h5py, hnswlib (pip install numpy matplotlib h5py hnswlib)
 # Time: roughly 30-60 min on 8 cores (the --compare-build single-thread build of 1M points dominates).

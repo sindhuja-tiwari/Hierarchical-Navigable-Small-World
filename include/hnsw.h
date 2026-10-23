@@ -181,7 +181,7 @@ public:
             for (size_t i = heap.size(); i-- > 0; heap.pop()) cands[i] = heap.top();  // ascending
             cur = cands.front().second;  // closest becomes entry point for next layer
             cur_d = cands.front().first;
-            std::vector<Cand> sel = select_neighbors(cands, M_);
+            std::vector<Cand> sel = select_neighbors(cands, M_, static_cast<node_t>(id));
             connect(static_cast<node_t>(id), sel, l);
         }
 
@@ -189,15 +189,15 @@ public:
     }
 
     // Insert n row-major vectors with `threads` workers. Labels are first_label + row.
-    void add_batch(const float* data, size_t n, size_t threads, label_t first_label = 0) {
-        if (n == 0) return;
+    // Returns the number of nodes still unreachable after repair (0 when the graph is whole).
+    size_t add_batch(const float* data, size_t n, size_t threads, label_t first_label = 0) {
+        if (n == 0) return 0;
         const bool seeded = (size() == 0);
         if (seeded) add(data, first_label);  // seed the graph before going parallel
         std::atomic<size_t> next{seeded ? 1u : 0u};
         if (threads <= 1) {
             for (size_t i = next; i < n; ++i) add(data + i * p_.dim, first_label + i);
-            repair_connectivity();
-            return;
+            return repair_connectivity();
         }
         std::vector<std::thread> pool;
         std::vector<std::exception_ptr> errs(threads);
@@ -217,7 +217,7 @@ public:
         for (auto& th : pool) th.join();
         for (auto& e : errs)
             if (e) std::rethrow_exception(e);
-        repair_connectivity();  // concurrent inserts can orphan a few nodes; see below
+        return repair_connectivity();  // concurrent inserts can orphan a few nodes; see below
     }
 
     // Re-attach nodes that have no layer-0 path from the entry point. Two inserts that run
@@ -410,11 +410,14 @@ private:
     }
 
     // l = floor(-ln(U) * mL), mL = 1/ln(M). Pure function of (seed, id): no shared RNG state.
-    int random_level(uint64_t id) const {
-        uint64_t z = p_.seed + (id + 1) * 0x9E3779B97F4A7C15ULL;
+    static uint64_t mix64(uint64_t z) {  // splitmix64 finaliser
         z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
         z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
-        z ^= z >> 31;
+        return z ^ (z >> 31);
+    }
+
+    int random_level(uint64_t id) const {
+        const uint64_t z = mix64(p_.seed + (id + 1) * 0x9E3779B97F4A7C15ULL);
         double u = static_cast<double>((z >> 11) + 1) * (1.0 / 9007199254740993.0);  // (0,1)
         return std::min(static_cast<int>(-std::log(u) * mult_), kMaxLevel);
     }
@@ -519,23 +522,54 @@ private:
     // sorted by ascending distance to the base point. A candidate is kept only if it is
     // closer to the base point than to every neighbour already kept; this favours
     // neighbours in different "directions" and keeps clustered data connected.
-    std::vector<Cand> select_neighbors(const std::vector<Cand>& cands, size_t m) const {
+    //
+    // Exact duplicates of the base point (distance 0) need special handling. A duplicate
+    // sits at the same distance from every other candidate as the base point does, so it
+    // carries no direction and must not be used to prune anyone. And because they sort
+    // first, without a cap they would fill the whole list and turn each group of copies
+    // into an island. So at most a quarter of the slots go to duplicates up front, the
+    // heuristic runs on the rest, and any slots still free are topped up with duplicates.
+    // Which duplicates a node keeps is a hash of (base, duplicate) rather than lowest id
+    // first; otherwise every list would keep the same oldest copies and newer copies
+    // would lose all their in-edges. Data without exact duplicates is unaffected.
+    std::vector<Cand> select_neighbors(const std::vector<Cand>& cands, size_t m, node_t base) const {
         if (cands.size() <= m) return cands;
-        std::vector<Cand> sel;
+        const size_t max_dups = std::max<size_t>(1, m / 4);
+        size_t ndup = 0;
+        while (ndup < cands.size() && cands[ndup].first == 0.0f) ++ndup;
+        std::vector<Cand> reordered;  // only built when there are duplicates to shuffle
+        if (ndup > 1) {
+            reordered = cands;
+            auto rank = [&](node_t x) { return mix64((static_cast<uint64_t>(base) << 32) | x); };
+            std::sort(reordered.begin(), reordered.begin() + ndup,
+                      [&](const Cand& a, const Cand& b) { return rank(a.second) < rank(b.second); });
+        }
+        const std::vector<Cand>& order = ndup > 1 ? reordered : cands;
+        std::vector<Cand> sel, spare_dups;
         sel.reserve(m);
-        for (const Cand& c : cands) {
+        size_t dups = 0;
+        for (const Cand& c : order) {
+            if (sel.size() == m) break;
+            if (c.first == 0.0f) {
+                if (dups < max_dups) {
+                    sel.push_back(c);
+                    ++dups;
+                } else {
+                    spare_dups.push_back(c);
+                }
+                continue;
+            }
             bool keep = true;
             for (const Cand& s : sel) {
+                if (s.first == 0.0f) continue;  // a duplicate of the base point prunes nothing
                 if (l2_sq(vec(c.second), vec(s.second), p_.dim) < c.first) {
                     keep = false;
                     break;
                 }
             }
-            if (keep) {
-                sel.push_back(c);
-                if (sel.size() == m) break;
-            }
+            if (keep) sel.push_back(c);
         }
+        for (size_t i = 0; i < spare_dups.size() && sel.size() < m; ++i) sel.push_back(spare_dups[i]);
         return sel;
     }
 
@@ -563,7 +597,7 @@ private:
                 cs.emplace_back(s.first, id);  // dist(n, id) == dist(id, n)
                 for (size_t j = 0; j < c; ++j) cs.emplace_back(l2_sq(vec(n), vec(NL[1 + j]), p_.dim), NL[1 + j]);
                 std::sort(cs.begin(), cs.end());
-                std::vector<Cand> keep = select_neighbors(cs, capn);
+                std::vector<Cand> keep = select_neighbors(cs, capn, n);
                 NL[0] = static_cast<node_t>(keep.size());
                 for (size_t j = 0; j < keep.size(); ++j) NL[1 + j] = keep[j].second;
             }
