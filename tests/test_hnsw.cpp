@@ -1,6 +1,7 @@
 // Dependency-free test suite. Exit code 0 == all passed.
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <set>
 
@@ -133,6 +134,74 @@ static void test_search_ordering() {
     }
 }
 
+// Exact duplicate vectors used to turn each group of copies into an island: with 50 distinct
+// vectors x 100 copies, 98% of nodes were unreachable and repair could not fix it.
+static void test_duplicates() {
+    std::printf("exact duplicate vectors stay connected\n");
+    const size_t d = 16;
+    struct Case { const char* name; size_t n, distinct; } cases[] = {{"50 x 100 copies", 5000, 50}, {"2500 x 2 copies", 5000, 2500}};
+    for (const Case& c : cases) {
+        ds::Matrix u = ds::synthetic(c.distinct, d, 10, 5);
+        ds::Matrix base;
+        base.n = c.n;
+        base.d = d;
+        base.v.resize(c.n * d);
+        for (size_t i = 0; i < c.n; ++i) std::memcpy(&base.v[i * d], u.row(i % c.distinct), d * sizeof(float));
+        hnsw::Index::Params p;
+        p.dim = d;
+        p.max_elements = c.n;
+        // serial inserts without repair: the graph itself must hold together
+        hnsw::Index serial(p);
+        for (size_t i = 0; i < c.n; ++i) serial.add(base.row(i), i);
+        CHECK(serial.unreachable_ids().empty(), "%s: %zu unreachable before repair", c.name, serial.unreachable_ids().size());
+        std::string err;
+        CHECK(serial.check_invariants(&err), "%s: %s", c.name, err.c_str());
+        hnsw::Index par(p);
+        size_t left = par.add_batch(base.v.data(), c.n, 8);
+        CHECK(left == 0, "%s: %zu unreachable after parallel build", c.name, left);
+        // each query has `copies` exact matches in the index; all of them (up to k) must come back
+        const size_t want = std::min<size_t>(c.n / c.distinct, 10);
+        size_t exact = 0;
+        for (size_t i = 0; i < c.distinct; ++i) {
+            auto r = par.search(u.row(i), 10, 50);
+            if (r.size() == 10 && r[want - 1].first == 0.0f) ++exact;
+        }
+        CHECK(exact >= c.distinct * 99 / 100, "%s: exact hits for %zu/%zu queries", c.name, exact, c.distinct);
+    }
+}
+
+static void test_api_edges() {
+    std::printf("api edge cases\n");
+    auto bad = [](size_t dim, size_t max_el, size_t M) {
+        hnsw::Index::Params p;
+        p.dim = dim;
+        p.max_elements = max_el;
+        p.M = M;
+        try {
+            hnsw::Index idx(p);
+        } catch (const std::invalid_argument&) {
+            return true;
+        }
+        return false;
+    };
+    CHECK(bad(0, 10, 16), "dim 0 must throw");
+    CHECK(bad(4, 0, 16), "max_elements 0 must throw");
+    CHECK(bad(4, 10, 1), "M 1 must throw");
+    CHECK(bad(4, 10, 129), "M 129 must throw");
+
+    ds::Matrix a = ds::synthetic(1000, 8, 10, 6), b = ds::synthetic(1000, 8, 10, 6, 1);
+    hnsw::Index::Params p;
+    p.dim = 8;
+    p.max_elements = 2000;
+    hnsw::Index idx(p);
+    CHECK(idx.add_batch(a.v.data(), a.n, 4) == 0, "first batch fully reachable");
+    CHECK(idx.add_batch(b.v.data(), b.n, 4, 1000) == 0, "second batch fully reachable");
+    CHECK(idx.size() == 2000, "size %zu", idx.size());
+    CHECK(idx.search(a.row(0), 0, 10).empty(), "k = 0 returns nothing");
+    auto r = idx.search(b.row(7), 1, 50);
+    CHECK(!r.empty() && r[0].second == 1007 && r[0].first == 0.0f, "second batch labels start at first_label");
+}
+
 int main() {
     std::printf("distance kernel: %s\n", hnsw::simd_backend());
     test_tiny();
@@ -140,6 +209,8 @@ int main() {
     test_self_query();
     test_parallel_build();
     test_search_ordering();
+    test_duplicates();
+    test_api_edges();
     if (g_fail) {
         std::printf("\n%d check(s) FAILED\n", g_fail);
         return 1;
